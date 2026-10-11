@@ -78,7 +78,7 @@ Profile Profile::fromCurrentState(std::string name) {
     // Mods parked in the vault belong in the picture too. Without them, every
     // profile made after a switch would quietly forget the mods that are out of
     // the folder at that moment.
-    for (auto const& [id, path] : vault::scanVault()) {
+    for (auto const& [id, stored] : vault::scanVault()) {
         if (profile.find(id)) continue;
 
         ProfileEntry entry;

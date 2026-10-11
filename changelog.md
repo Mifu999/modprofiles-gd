@@ -1,3 +1,13 @@
+# 2.2.0
+
+## Changed
+- The vault is now sorted into one sub-folder per setup instead of one flat pile. A parked file goes into the folder named after the profile it was last in use under, so `mod-profiles-vault/speedrun-setup/` reads as "what that setup holds while it is not running". Files parked before any profile was applied land in `unsorted/`.
+- Each file is still stored only once: a folder per profile containing every mod of that profile would duplicate every mod two profiles share.
+- `index.json` gained a format version and now records the folder and the parking date for each file. Vaults written by 2.1.0 are read as-is, and their files are sorted into folders on the next switch.
+- The files on disk win over the index, so moving things around by hand no longer desynchronises anything.
+- The Vault popup lists what each folder holds, by profile name.
+- Empty vault folders are tidied up after a switch.
+
 # 2.1.0
 
 ## Added

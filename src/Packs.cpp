@@ -67,7 +67,7 @@ geode::Result<int> packs::exportToFile(
         }
         else if (auto found = parked.find(id); found != parked.end()) {
             // Parked mods are still yours, so they can travel too.
-            package = found->second;
+            package = found->second.path;
         }
 
         if (package.empty() || !std::filesystem::exists(package)) {

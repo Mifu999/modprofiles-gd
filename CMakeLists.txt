@@ -20,7 +20,7 @@ endif()
 
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
-project(ModProfiles VERSION 2.1.0)
+project(ModProfiles VERSION 2.2.0)
 
 file(GLOB_RECURSE SOURCES
     src/*.cpp

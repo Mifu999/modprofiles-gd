@@ -39,6 +39,29 @@ namespace {
     bool mustStayInMods(std::string const& id) {
         return id == "geode.loader" || id == GEODE_MOD_ID;
     }
+
+    /// Folder name of a parked file, relative to the vault root.
+    std::string folderOf(std::filesystem::path const& file, std::filesystem::path const& root) {
+        auto parent = file.parent_path();
+        if (parent == root) return "";
+        return parent.filename().string();
+    }
+
+    /// Drops sub-folders that no longer hold anything. Removing an empty folder
+    /// is tidying, not deleting someone's mods.
+    void pruneEmptyFolders(std::filesystem::path const& root) {
+        std::error_code ec;
+        for (auto const& entry : std::filesystem::directory_iterator(root, ec)) {
+            if (ec) return;
+            if (!entry.is_directory()) continue;
+
+            std::error_code emptyEc;
+            if (std::filesystem::is_empty(entry.path(), emptyEc) && !emptyEc) {
+                std::error_code removeEc;
+                std::filesystem::remove(entry.path(), removeEc);
+            }
+        }
+    }
 }
 
 std::filesystem::path vault::dir() {
@@ -53,8 +76,8 @@ std::filesystem::path vault::indexFile() {
     return vault::dir() / "index.json";
 }
 
-std::map<std::string, std::string> vault::readIndex() {
-    std::map<std::string, std::string> index;
+std::map<std::string, vault::StoredMod> vault::readIndex() {
+    std::map<std::string, StoredMod> index;
 
     auto path = vault::indexFile();
     if (!std::filesystem::exists(path)) return index;
@@ -68,24 +91,55 @@ std::map<std::string, std::string> vault::readIndex() {
     auto value = json.unwrap();
     if (!value.isObject()) return index;
 
-    for (auto const& item : value) {
+    auto root = vault::dir();
+
+    // Version 2.1 wrote a flat `{ "<id>": "<file name>" }` object with every
+    // file in the vault root. Read it so an upgrade keeps finding its files.
+    auto const& mods = value.contains("mods") && value["mods"].isObject() ? value["mods"] : value;
+
+    for (auto const& item : mods) {
         auto key = item.getKey();
         if (!key.has_value() || key->empty()) continue;
+        if (*key == "format" || *key == "mods") continue;
 
-        auto name = item.asString().unwrapOrDefault();
-        if (name.empty()) continue;
+        StoredMod stored;
+        stored.id = *key;
 
-        index[*key] = name;
+        if (item.isString()) {
+            stored.fileName = item.asString().unwrapOrDefault();
+        }
+        else if (item.isObject()) {
+            stored.fileName = item["file"].asString().unwrapOrDefault();
+            stored.folder   = item["folder"].asString().unwrapOrDefault();
+            stored.parked   = static_cast<std::int64_t>(item["parked"].asInt().unwrapOr(0));
+        }
+
+        if (stored.fileName.empty()) continue;
+
+        stored.path = stored.folder.empty()
+            ? root / stored.fileName
+            : root / stored.folder / stored.fileName;
+
+        index[stored.id] = std::move(stored);
     }
 
     return index;
 }
 
-void vault::writeIndex(std::map<std::string, std::string> const& index) {
-    auto value = matjson::Value::object();
-    for (auto const& [id, name] : index) {
-        value.set(id, name);
+void vault::writeIndex(std::map<std::string, StoredMod> const& index) {
+    auto mods = matjson::Value::object();
+    for (auto const& [id, stored] : index) {
+        mods.set(id, matjson::makeObject({
+            { "file",   stored.fileName },
+            { "folder", stored.folder },
+            { "parked", matjson::Value(static_cast<std::intmax_t>(stored.parked)) },
+        }));
     }
+
+    auto value = matjson::makeObject({
+        { "format", matjson::Value(static_cast<std::intmax_t>(2)) },
+        { "mods",   std::move(mods) },
+    });
 
     if (auto res = file::writeString(vault::indexFile(), value.dump()); !res) {
         log::error("Could not write the vault index: {}", res.unwrapErr());
@@ -126,16 +180,20 @@ std::map<std::string, std::filesystem::path> vault::scanModsDir() {
     return result;
 }
 
-std::map<std::string, std::filesystem::path> vault::scanVault() {
-    std::map<std::string, std::filesystem::path> result;
+std::map<std::string, vault::StoredMod> vault::scanVault() {
+    std::map<std::string, StoredMod> result;
 
+    auto root = vault::dir();
     auto index = vault::readIndex();
-    std::map<std::string, std::string> idByFileName;
-    for (auto const& [id, name] : index) {
-        idByFileName[name] = id;
+
+    // File name to id, so a file that was moved to another folder by hand is
+    // still recognised as the mod it is.
+    std::map<std::string, StoredMod const*> byFileName;
+    for (auto const& [id, stored] : index) {
+        byFileName[stored.fileName] = &stored;
     }
 
-    auto entries = file::readDirectory(vault::dir());
+    auto entries = file::readDirectory(root, true);
     if (!entries) {
         log::error("Could not read the vault: {}", entries.unwrapErr());
         return result;
@@ -144,14 +202,33 @@ std::map<std::string, std::filesystem::path> vault::scanVault() {
     for (auto const& path : entries.unwrap()) {
         if (path.extension() != ".geode") continue;
 
-        auto name = path.filename().string();
-        auto found = idByFileName.find(name);
-        auto id = found != idByFileName.end() ? found->second : path.stem().string();
+        StoredMod stored;
+        stored.fileName = path.filename().string();
+        stored.folder   = folderOf(path, root);
+        stored.path     = path;
 
-        result[id] = path;
+        auto found = byFileName.find(stored.fileName);
+        if (found != byFileName.end()) {
+            stored.id     = found->second->id;
+            stored.parked = found->second->parked;
+        }
+        else {
+            stored.id = path.stem().string();
+        }
+
+        result[stored.id] = std::move(stored);
     }
 
     return result;
+}
+
+std::map<std::string, std::vector<vault::StoredMod>> vault::byFolder() {
+    std::map<std::string, std::vector<StoredMod>> grouped;
+    for (auto const& [id, stored] : vault::scanVault()) {
+        auto key = stored.folder.empty() ? std::string(UNSORTED_FOLDER) : stored.folder;
+        grouped[key].push_back(stored);
+    }
+    return grouped;
 }
 
 std::size_t vault::storedCount() {
@@ -193,23 +270,38 @@ std::set<std::string> vault::wantedIds(Profile const& profile) {
     return wanted;
 }
 
-vault::MoveReport vault::applyProfile(Profile const& profile) {
+vault::MoveReport vault::applyProfile(Profile const& profile, std::string const& parkInto) {
     MoveReport report;
 
     auto wanted  = vault::wantedIds(profile);
     auto inMods  = vault::scanModsDir();
     auto inVault = vault::scanVault();
     auto index   = vault::readIndex();
-    auto vaultPath = vault::dir();
+
+    auto root      = vault::dir();
     auto modsPath  = dirs::getModsDir();
+    auto folder    = parkInto.empty() ? std::string(UNSORTED_FOLDER) : Profile::slugify(parkInto);
+    auto parkPath  = root / folder;
+
+    auto now = Profile::nowSeconds();
 
     // 1. Park everything the profile does not ask for.
+    bool parkDirReady = false;
     for (auto const& [id, path] : inMods) {
         if (wanted.contains(id)) continue;
         if (mustStayInMods(id)) continue;
 
+        if (!parkDirReady) {
+            if (auto res = file::createDirectoryAll(parkPath); !res) {
+                report.failed.push_back(fmt::format("vault folder: {}", res.unwrapErr()));
+                log::error("Could not create '{}': {}", parkPath.string(), res.unwrapErr());
+                break;
+            }
+            parkDirReady = true;
+        }
+
         auto name = path.filename().string();
-        auto target = vaultPath / name;
+        auto target = parkPath / name;
 
         if (auto res = moveFile(path, target); !res) {
             report.failed.push_back(fmt::format("{}: {}", id, res.unwrapErr()));
@@ -217,7 +309,14 @@ vault::MoveReport vault::applyProfile(Profile const& profile) {
             continue;
         }
 
-        index[id] = name;
+        StoredMod stored;
+        stored.id       = id;
+        stored.fileName = name;
+        stored.folder   = folder;
+        stored.parked   = now;
+        stored.path     = target;
+        index[id] = std::move(stored);
+
         ++report.movedOut;
     }
 
@@ -234,10 +333,9 @@ vault::MoveReport vault::applyProfile(Profile const& profile) {
             continue;
         }
 
-        auto name = found->second.filename().string();
-        auto target = modsPath / name;
+        auto target = modsPath / found->second.fileName;
 
-        if (auto res = moveFile(found->second, target); !res) {
+        if (auto res = moveFile(found->second.path, target); !res) {
             report.failed.push_back(fmt::format("{}: {}", id, res.unwrapErr()));
             log::error("Could not restore '{}': {}", id, res.unwrapErr());
             continue;
@@ -248,24 +346,25 @@ vault::MoveReport vault::applyProfile(Profile const& profile) {
     }
 
     vault::writeIndex(index);
+    pruneEmptyFolders(root);
 
-    log::info("Vault switch: {} parked, {} restored, {} missing",
-        report.movedOut, report.movedIn, report.missing.size());
+    log::info("Vault switch into '{}': {} parked, {} restored, {} missing",
+        folder, report.movedOut, report.movedIn, report.missing.size());
 
     return report;
 }
 
 geode::Result<int> vault::restoreAll() {
-    auto stored = vault::scanVault();
-    auto inMods = vault::scanModsDir();
+    auto stored   = vault::scanVault();
+    auto inMods   = vault::scanModsDir();
     auto modsPath = dirs::getModsDir();
-    auto index = vault::readIndex();
+    auto index    = vault::readIndex();
 
     int restored = 0;
     int skipped = 0;
     std::vector<std::string> failed;
 
-    for (auto const& [id, path] : stored) {
+    for (auto const& [id, parked] : stored) {
         // A copy of this mod is already installed - probably a newer one from
         // an import. Leave the parked file where it is rather than overwrite it.
         if (inMods.contains(id)) {
@@ -273,8 +372,8 @@ geode::Result<int> vault::restoreAll() {
             continue;
         }
 
-        auto target = modsPath / path.filename();
-        if (auto res = moveFile(path, target); !res) {
+        auto target = modsPath / parked.fileName;
+        if (auto res = moveFile(parked.path, target); !res) {
             failed.push_back(fmt::format("{}: {}", id, res.unwrapErr()));
             continue;
         }
@@ -284,6 +383,7 @@ geode::Result<int> vault::restoreAll() {
     }
 
     vault::writeIndex(index);
+    pruneEmptyFolders(vault::dir());
 
     if (skipped > 0) {
         log::info("{} parked file(s) left alone: already installed", skipped);

@@ -72,6 +72,12 @@ public:
     /// The mode the user picked in the settings.
     static ApplyMode currentMode();
 
+    /// Slug of the profile applied last, or empty if none was. Mod files parked
+    /// by the next switch go into the vault folder named after it, so the vault
+    /// reads as "what each of your setups holds while it is not in use".
+    static std::string activeProfile();
+    static void setActiveProfile(std::string slug);
+
     /// Directory holding the profile JSON files. Created on first use.
     std::filesystem::path profilesDir() const;
 

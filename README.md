@@ -17,7 +17,7 @@ This is an updated merge of two no longer maintained mods:
 
 - **Profiles** - a named set of mod states, stored as one JSON file each in the mod's save directory
 - **Real switching** - applying a profile moves the `.geode` files: what the profile does not list goes to the vault, what it lists comes back. Your mod list holds the profile, not a pile of disabled mods. (Toggle-only mode is one setting away.)
-- **Vault** - `geode/mod-profiles-vault`, next to the mods folder but invisible to Geode; *Restore all* empties it back into `geode/mods`
+- **Vault** - `geode/mod-profiles-vault`, next to the mods folder but invisible to Geode, sorted into one sub-folder per setup; *Restore all* empties it back into `geode/mods`
 - **Dependency aware** - the dependencies of the mods a profile keeps are kept too
 - **Auto backup** - the state before an apply is always kept, so a wrong switch is reversible
 - **Editor** - per-mod toggles with search, *All / None / Invert*, and *Snapshot*; parked mods stay listed and selectable
@@ -28,14 +28,20 @@ This is an updated merge of two no longer maintained mods:
 ## How a switch works
 
 ```
-geode/mods/                         geode/mod-profiles-vault/
-├── a.geode  (wanted)   ──stays──►  ├── index.json   { id -> file name }
-├── b.geode  (unwanted) ──parked──► ├── b.geode
-└── c.geode  (unwanted) ──parked──► └── c.geode
-                        ◄─restored─ d.geode  (wanted, was parked)
+geode/mods/                      geode/mod-profiles-vault/
+├── a.geode  (wanted)  ─stays─►  ├── index.json      what is parked, where, since when
+├── b.geode  (unwanted) ─park─►  ├── speedrun-setup/ parked while "Speedrun setup" was active
+└── c.geode  (unwanted) ─park─►  │   ├── b.geode
+                                 │   └── c.geode
+                      ◄─restore─ └── unsorted/       parked with no profile active yet
+                                     └── d.geode
 ```
 
-Mod ids are resolved from each loaded mod's package path, so a file that is not called `<id>.geode` is still matched to the right mod; `index.json` remembers the mapping for whatever is parked.
+The vault is sorted by setup: a parked file goes into the folder named after the profile it was **last in use under**, so each folder reads as "what this setup holds while it is not running".
+
+Each file is stored **once**. A folder per profile holding every mod of that profile would mean duplicating the mods two profiles share - 200 shared mods, two copies, drifting apart as they update - so the folder records provenance rather than membership. Which mods belong to a profile is the profile's own JSON file.
+
+Mod ids are resolved from each loaded mod's package path, so a file that is not called `<id>.geode` is still matched to the right mod; `index.json` remembers the mapping, and the files on disk win over it, so moving things by hand cannot desynchronise anything.
 
 ## Pack format
 

@@ -362,20 +362,32 @@ void ProfilesPopup::onVault() {
     if (stored.empty()) {
         auto body = fmt::format(
             "The vault is empty - every mod file is in <cy>geode/mods</c>.\n\n"
-            "When you apply a profile, the mods it does not list are parked here:\n<cj>{}</c>",
+            "When you apply a profile, the mods it does not list are parked here, "
+            "in a folder named after the setup they were in use under:\n<cj>{}</c>",
             path
         );
         FLAlertLayer::create("Vault", body.c_str(), "OK")->show();
         return;
     }
 
+    // One line per sub-folder, so it is obvious which setup each pile came from.
+    std::vector<std::string> lines;
+    for (auto const& [folder, mods] : vault::byFolder()) {
+        auto const* profile = Manager::get()->bySlug(folder);
+        lines.push_back(fmt::format(
+            "<cy>{}</c>: {} file(s)",
+            profile ? profile->name : folder,
+            mods.size()
+        ));
+    }
+
     Ref<ProfilesPopup> self = this;
     createQuickPopup(
         "Vault",
         fmt::format(
-            "<cj>{}</c> mod file(s) are parked outside your mods folder:\n<cl>{}</c>\n\n"
+            "<cj>{}</c> mod file(s) are parked outside your mods folder:\n<cl>{}</c>\n\n{}\n\n"
             "Put all of them back into <cy>geode/mods</c>?",
-            stored.size(), path
+            stored.size(), path, join(lines, "\n")
         ),
         "Cancel", "Restore all",
         [self](FLAlertLayer*, bool confirmed) {
@@ -388,6 +400,8 @@ void ProfilesPopup::onVault() {
             }
 
             auto restored = res.unwrap();
+            // Everything is back in one folder, so no setup is "active" now.
+            Manager::setActiveProfile("");
             self->refresh();
 
             createQuickPopup(

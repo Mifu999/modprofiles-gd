@@ -8,7 +8,7 @@
     },
     "id": "mifu.modprofiles",
     "name": "Mod Profiles",
-    "version": "v2.1.0",
+    "version": "v2.2.0",
     "developers": ["Mifuu"],
     "description": "Save, switch and share complete mod setups as profiles",
     "tags": ["utility", "interface", "enhancement", "offline"],

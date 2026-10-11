@@ -150,6 +150,14 @@ ApplyMode Manager::currentMode() {
         : ApplyMode::Toggle;
 }
 
+std::string Manager::activeProfile() {
+    return Mod::get()->getSavedValue<std::string>("active-profile", "");
+}
+
+void Manager::setActiveProfile(std::string slug) {
+    Mod::get()->setSavedValue<std::string>("active-profile", std::move(slug));
+}
+
 ApplyReport Manager::apply(Profile const& profile, ApplyMode mode, bool disableUnlisted) {
     ApplyReport report;
 
@@ -166,7 +174,10 @@ ApplyReport Manager::apply(Profile const& profile, ApplyMode mode, bool disableU
     }
 
     if (mode == ApplyMode::MoveFiles) {
-        auto moves = vault::applyProfile(profile);
+        // Files leaving the folder are parked under the name of the setup they
+        // were in use under, which is the profile applied last.
+        auto previous = Manager::activeProfile();
+        auto moves = vault::applyProfile(profile, previous);
         report.movedOut = moves.movedOut;
         report.movedIn  = moves.movedIn;
         report.missing  = std::move(moves.missing);
@@ -192,6 +203,7 @@ ApplyReport Manager::apply(Profile const& profile, ApplyMode mode, bool disableU
             ++report.changed;
         }
 
+        Manager::setActiveProfile(profile.slug);
         return report;
     }
 
@@ -237,5 +249,6 @@ ApplyReport Manager::apply(Profile const& profile, ApplyMode mode, bool disableU
         }
     }
 
+    Manager::setActiveProfile(profile.slug);
     return report;
 }

@@ -182,7 +182,7 @@ void ProfileEditPopup::buildRows() {
 
     // Mods parked in the vault: not loaded, but still yours. They have to be
     // listed, otherwise a profile saved now would drop them for good.
-    for (auto const& [id, path] : vault::scanVault()) {
+    for (auto const& [id, stored] : vault::scanVault()) {
         if (known(id)) continue;
 
         Row row;
