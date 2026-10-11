@@ -1,0 +1,54 @@
+{
+    "geode": "5.9.0",
+    "gd": {
+        "win": "2.2081",
+        "android": "2.2081",
+        "mac": "2.2081",
+        "ios": "2.2081"
+    },
+    "id": "mifu.modprofiles",
+    "name": "Mod Profiles",
+    "version": "v2.0.0",
+    "developers": ["Mifuu"],
+    "description": "Save, switch and share complete mod setups as profiles",
+    "tags": ["utility", "interface", "enhancement", "offline"],
+    "resources": {
+        "sprites": [
+            "resources/profiles.png"
+        ]
+    },
+    "settings": {
+        "behaviour-title": {
+            "type": "title",
+            "name": "Behaviour"
+        },
+        "auto-backup": {
+            "type": "bool",
+            "name": "Backup before applying",
+            "description": "Before a profile is applied, save the current enabled/disabled state into an automatic profile called <cy>Auto backup</c>, so a wrong switch can always be undone.",
+            "default": true
+        },
+        "disable-unlisted": {
+            "type": "bool",
+            "name": "Disable unlisted mods",
+            "description": "When a profile is applied, also disable every installed mod the profile does not mention, so your setup matches it exactly. Nothing is ever deleted - the mods stay installed and can be re-enabled at any time.",
+            "default": false
+        },
+        "allow-self-disable": {
+            "type": "bool",
+            "name": "Allow disabling Mod Profiles",
+            "description": "Let profiles disable <cy>Mod Profiles</c> itself. Off by default, because once it is disabled you have to re-enable it by hand through the Geode menu before you can switch profiles again.",
+            "default": false
+        },
+        "import-title": {
+            "type": "title",
+            "name": "Importing"
+        },
+        "download-missing": {
+            "type": "bool",
+            "name": "Download missing mods",
+            "description": "When importing a profile, download the mods it lists that are not installed yet. Mods stored inside the profile file are always installed from the file; this setting only controls downloads from the <cy>Geode index</c> and from URLs.",
+            "default": true
+        }
+    }
+}
