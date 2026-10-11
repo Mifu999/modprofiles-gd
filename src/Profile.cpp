@@ -1,4 +1,5 @@
 #include "Profile.hpp"
+#include "Vault.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -70,6 +71,20 @@ Profile Profile::fromCurrentState(std::string name) {
         entry.name    = std::string(mod->getName().view());
         entry.version = mod->getVersion().toNonVString();
         entry.enabled = mod->isOrWillBeEnabled();
+        entry.source  = ModSource::Unknown;
+        profile.mods.push_back(std::move(entry));
+    }
+
+    // Mods parked in the vault belong in the picture too. Without them, every
+    // profile made after a switch would quietly forget the mods that are out of
+    // the folder at that moment.
+    for (auto const& [id, path] : vault::scanVault()) {
+        if (profile.find(id)) continue;
+
+        ProfileEntry entry;
+        entry.id      = id;
+        entry.name    = id;
+        entry.enabled = false;
         entry.source  = ModSource::Unknown;
         profile.mods.push_back(std::move(entry));
     }

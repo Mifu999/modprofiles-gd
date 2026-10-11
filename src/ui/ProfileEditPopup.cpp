@@ -1,4 +1,5 @@
 #include "ProfileEditPopup.hpp"
+#include "../Vault.hpp"
 
 #include <Geode/binding/ButtonSprite.hpp>
 #include <Geode/binding/CCMenuItemSpriteExtra.hpp>
@@ -173,18 +174,39 @@ void ProfileEditPopup::buildRows() {
         }
     }
 
-    // Entries the profile knows about but that are not installed here.
-    for (auto const& entry : m_profile.mods) {
-        bool installed = std::any_of(m_rows.begin(), m_rows.end(), [&](Row const& row) {
-            return row.id == entry.id;
+    auto known = [this](std::string const& id) {
+        return std::any_of(m_rows.begin(), m_rows.end(), [&](Row const& row) {
+            return row.id == id;
         });
-        if (installed) continue;
+    };
+
+    // Mods parked in the vault: not loaded, but still yours. They have to be
+    // listed, otherwise a profile saved now would drop them for good.
+    for (auto const& [id, path] : vault::scanVault()) {
+        if (known(id)) continue;
+
+        Row row;
+        row.id        = id;
+        row.name      = id;
+        row.installed = false;
+        row.parked    = true;
+        m_rows.push_back(std::move(row));
+
+        if (!m_states.contains(id)) {
+            m_states[id] = false;
+        }
+    }
+
+    // Entries the profile knows about that are neither installed nor parked.
+    for (auto const& entry : m_profile.mods) {
+        if (known(entry.id)) continue;
 
         Row row;
         row.id        = entry.id;
         row.name      = entry.name.empty() ? entry.id : entry.name;
         row.version   = entry.version;
         row.installed = false;
+        row.parked    = false;
         m_rows.push_back(std::move(row));
     }
 }
@@ -244,7 +266,10 @@ CCNode* ProfileEditPopup::createRowNode(Row const& row, float width) {
     name->setAnchorPoint({ 0.f, 0.5f });
     limitNodeWidth(name, 230.f, 0.45f, 0.2f);
     name->setPosition({ 10.f, ROW_HEIGHT / 2.f + 5.f });
-    if (!row.installed) {
+    if (row.parked) {
+        name->setColor({ 255, 200, 120 });
+    }
+    else if (!row.installed) {
         name->setColor({ 160, 160, 160 });
     }
     else if (!enabled) {
@@ -253,7 +278,8 @@ CCNode* ProfileEditPopup::createRowNode(Row const& row, float width) {
     node->addChild(name);
 
     std::string sub = row.version.empty() ? row.id : fmt::format("{}  v{}", row.id, row.version);
-    if (!row.installed) sub = fmt::format("not installed  -  {}", row.id);
+    if (row.parked)           sub = fmt::format("in the vault  -  {}", row.id);
+    else if (!row.installed)  sub = fmt::format("not installed  -  {}", row.id);
 
     auto subLabel = CCLabelBMFont::create(sub.c_str(), "chatFont.fnt");
     subLabel->setAnchorPoint({ 0.f, 0.5f });
@@ -278,6 +304,7 @@ CCNode* ProfileEditPopup::createRowNode(Row const& row, float width) {
 
     auto rowID = row.id;
     bool installed = row.installed;
+    bool parked = row.parked;
     // Held by reference so the callback can recolour just this row. Rebuilding
     // the whole list from inside a button's own callback would free the button
     // while it is still running.
@@ -285,7 +312,7 @@ CCNode* ProfileEditPopup::createRowNode(Row const& row, float width) {
 
     auto toggler = CCMenuItemExt::createTogglerWithStandardSprites(
         0.6f,
-        [this, rowID, installed, nameRef](CCMenuItemToggler* item) {
+        [this, rowID, installed, parked, nameRef](CCMenuItemToggler* item) {
             if (Manager::isProtected(rowID)) {
                 // Keep it on and say why, instead of silently undoing the tap.
                 m_states[rowID] = true;
@@ -303,9 +330,10 @@ CCNode* ProfileEditPopup::createRowNode(Row const& row, float width) {
             item->toggle(next);
 
             if (nameRef) {
-                if (!installed)   nameRef->setColor({ 160, 160, 160 });
-                else if (next)    nameRef->setColor({ 255, 255, 255 });
-                else              nameRef->setColor({ 255, 170, 170 });
+                if (parked)          nameRef->setColor({ 255, 200, 120 });
+                else if (!installed) nameRef->setColor({ 160, 160, 160 });
+                else if (next)       nameRef->setColor({ 255, 255, 255 });
+                else                 nameRef->setColor({ 255, 170, 170 });
             }
         }
     );

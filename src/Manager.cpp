@@ -1,4 +1,5 @@
 #include "Manager.hpp"
+#include "Vault.hpp"
 
 #include <Geode/loader/Dirs.hpp>
 #include <Geode/loader/Loader.hpp>
@@ -143,7 +144,13 @@ geode::Result<> Manager::remove(std::string_view slug) {
     return geode::Ok();
 }
 
-ApplyReport Manager::apply(Profile const& profile, bool disableUnlisted) {
+ApplyMode Manager::currentMode() {
+    return Mod::get()->getSettingValue<bool>("move-mod-files")
+        ? ApplyMode::MoveFiles
+        : ApplyMode::Toggle;
+}
+
+ApplyReport Manager::apply(Profile const& profile, ApplyMode mode, bool disableUnlisted) {
     ApplyReport report;
 
     // Snapshot first: applying a profile is the one destructive-feeling action
@@ -156,6 +163,36 @@ ApplyReport Manager::apply(Profile const& profile, bool disableUnlisted) {
         if (auto res = this->save(std::move(backup), false); !res) {
             log::error("Could not write the automatic backup: {}", res.unwrapErr());
         }
+    }
+
+    if (mode == ApplyMode::MoveFiles) {
+        auto moves = vault::applyProfile(profile);
+        report.movedOut = moves.movedOut;
+        report.movedIn  = moves.movedIn;
+        report.missing  = std::move(moves.missing);
+        report.failed   = std::move(moves.failed);
+
+        // Files are in place; make sure nothing that stayed is switched off.
+        // Mods whose file just left are not disabled on top of that: they are
+        // gone after the restart anyway, and disabling a dependency of a mod
+        // that is still here would only produce noise.
+        for (auto const& entry : profile.mods) {
+            if (!entry.enabled) continue;
+
+            auto* mod = Loader::get()->getLoadedMod(entry.id);
+            if (!mod || mod->isInternal()) continue;
+            if (mod->isOrWillBeEnabled()) continue;
+
+            if (auto res = mod->enable(); !res) {
+                auto error = res.unwrapErr();
+                report.failed.push_back(fmt::format("{}: {}", mod->getName(), error));
+                log::error("Could not enable {}: {}", entry.id, error);
+                continue;
+            }
+            ++report.changed;
+        }
+
+        return report;
     }
 
     for (auto const& entry : profile.mods) {

@@ -1,5 +1,6 @@
 #include "ProfilesPopup.hpp"
 #include "ProfileEditPopup.hpp"
+#include "../Vault.hpp"
 
 #include <Geode/binding/ButtonSprite.hpp>
 #include <Geode/binding/CCMenuItemSpriteExtra.hpp>
@@ -35,10 +36,17 @@ namespace {
 
     /// Shows what happened and offers the restart that makes it take effect.
     void reportAndOfferRestart(ApplyReport const& report, std::string const& profileName) {
-        std::string body = fmt::format(
-            "Applied <cy>{}</c>.\n<cj>{}</c> mod(s) switched.",
-            profileName, report.changed
-        );
+        std::string body = fmt::format("Applied <cy>{}</c>.", profileName);
+
+        if (report.movedOut > 0 || report.movedIn > 0) {
+            body += fmt::format(
+                "\n<co>{}</c> mod file(s) moved to the vault, <cg>{}</c> brought back.",
+                report.movedOut, report.movedIn
+            );
+        }
+        if (report.changed > 0 || (report.movedOut == 0 && report.movedIn == 0)) {
+            body += fmt::format("\n<cj>{}</c> mod(s) switched.", report.changed);
+        }
 
         if (!report.missing.empty()) {
             body += fmt::format("\n<cl>{}</c> listed mod(s) are not installed.", report.missing.size());
@@ -49,7 +57,7 @@ namespace {
         }
 
         if (!report.needsRestart()) {
-            body += "\n\nNothing had to change - your mods already match this profile.";
+            body += "\n\nNothing had to change - your mods folder already matches this profile.";
             // FLAlertLayer takes a gd::string; go through c_str() so the
             // conversion is the unambiguous one from a C string.
             FLAlertLayer::create("Mod Profiles", body.c_str(), "OK")->show();
@@ -112,24 +120,32 @@ bool ProfilesPopup::init() {
     m_mainLayer->addChild(m_list);
 
     // --- bottom actions ------------------------------------------------------
-    auto newSpr = ButtonSprite::create("Save current setup", "bigFont.fnt", "GJ_button_01.png", 0.6f);
-    newSpr->setScale(0.62f);
+    auto newSpr = ButtonSprite::create("Save setup", "bigFont.fnt", "GJ_button_01.png", 0.6f);
+    newSpr->setScale(0.6f);
     auto newBtn = CCMenuItemExt::createSpriteExtra(newSpr, [this](CCMenuItemSpriteExtra*) {
         this->onNewFromCurrent();
     });
 
     auto importSpr = ButtonSprite::create("Import", "bigFont.fnt", "GJ_button_05.png", 0.6f);
-    importSpr->setScale(0.62f);
+    importSpr->setScale(0.6f);
     auto importBtn = CCMenuItemExt::createSpriteExtra(importSpr, [this](CCMenuItemSpriteExtra*) {
         this->onImport();
+    });
+
+    auto vaultSpr = ButtonSprite::create("Vault", "bigFont.fnt", "GJ_button_04.png", 0.6f);
+    vaultSpr->setScale(0.6f);
+    auto vaultBtn = CCMenuItemExt::createSpriteExtra(vaultSpr, [this](CCMenuItemSpriteExtra*) {
+        this->onVault();
     });
 
     auto bottomMenu = CCMenu::create();
     bottomMenu->setPosition({ POPUP_WIDTH / 2.f, 23.f });
     bottomMenu->addChild(newBtn);
-    newBtn->setPositionX(-62.f);
+    newBtn->setPositionX(-110.f);
     bottomMenu->addChild(importBtn);
-    importBtn->setPositionX(78.f);
+    importBtn->setPositionX(-5.f);
+    bottomMenu->addChild(vaultBtn);
+    vaultBtn->setPositionX(85.f);
     m_mainLayer->addChild(bottomMenu);
 
     this->refresh();
@@ -286,27 +302,106 @@ void ProfilesPopup::onEdit(Profile const& profile) {
 }
 
 void ProfilesPopup::onApply(Profile const& profile) {
+    auto mode  = Manager::currentMode();
     bool exact = Mod::get()->getSettingValue<bool>("disable-unlisted");
 
     std::string body = fmt::format(
-        "Switch your mods to <cy>{}</c>?\n<cj>{}</c> of its <cj>{}</c> mod(s) will be enabled.",
+        "Switch your mods to <cy>{}</c>?\n<cj>{}</c> of its <cj>{}</c> mod(s) are wanted.",
         profile.name, profile.enabledCount(), profile.mods.size()
     );
-    if (exact) {
+
+    if (mode == ApplyMode::MoveFiles) {
+        // Count the actual moves, so the confirmation says what will happen
+        // rather than what might.
+        auto wanted  = vault::wantedIds(profile);
+        auto inMods  = vault::scanModsDir();
+        auto inVault = vault::scanVault();
+
+        int toPark = 0;
+        for (auto const& [id, path] : inMods) {
+            if (!wanted.contains(id) && id != GEODE_MOD_ID) ++toPark;
+        }
+        int toRestore = 0;
+        for (auto const& id : wanted) {
+            if (!inMods.contains(id) && inVault.contains(id)) ++toRestore;
+        }
+
+        body += fmt::format(
+            "\n\n<co>{}</c> mod file(s) will leave <cy>geode/mods</c> for the vault, "
+            "<cg>{}</c> will come back from it.",
+            toPark, toRestore
+        );
+        body += "\nDependencies of the mods you keep stay as well.";
+    }
+    else if (exact) {
         body += "\nMods this profile does not list will be <cr>disabled</c>.";
     }
+
     if (Mod::get()->getSettingValue<bool>("auto-backup") && profile.slug != AUTO_BACKUP_SLUG) {
         body += "\n\nYour current setup is saved as <co>Auto backup</c> first.";
     }
 
     auto copy = profile;
+    Ref<ProfilesPopup> self = this;
     createQuickPopup(
         "Apply profile", body, "Cancel", "Apply",
-        [copy, exact](FLAlertLayer*, bool confirmed) {
+        [copy, exact, mode, self](FLAlertLayer*, bool confirmed) {
             if (!confirmed) return;
 
-            auto report = Manager::get()->apply(copy, exact);
+            auto report = Manager::get()->apply(copy, mode, exact);
+            self->refresh();
             reportAndOfferRestart(report, copy.name);
+        }
+    );
+}
+
+void ProfilesPopup::onVault() {
+    auto stored = vault::scanVault();
+    auto path = vault::dir().string();
+
+    if (stored.empty()) {
+        auto body = fmt::format(
+            "The vault is empty - every mod file is in <cy>geode/mods</c>.\n\n"
+            "When you apply a profile, the mods it does not list are parked here:\n<cj>{}</c>",
+            path
+        );
+        FLAlertLayer::create("Vault", body.c_str(), "OK")->show();
+        return;
+    }
+
+    Ref<ProfilesPopup> self = this;
+    createQuickPopup(
+        "Vault",
+        fmt::format(
+            "<cj>{}</c> mod file(s) are parked outside your mods folder:\n<cl>{}</c>\n\n"
+            "Put all of them back into <cy>geode/mods</c>?",
+            stored.size(), path
+        ),
+        "Cancel", "Restore all",
+        [self](FLAlertLayer*, bool confirmed) {
+            if (!confirmed) return;
+
+            auto res = vault::restoreAll();
+            if (!res) {
+                notify(fmt::format("Restore failed: {}", res.unwrapErr()), NotificationIcon::Error);
+                return;
+            }
+
+            auto restored = res.unwrap();
+            self->refresh();
+
+            createQuickPopup(
+                "Vault",
+                fmt::format(
+                    "<cg>{}</c> mod file(s) moved back into your mods folder.\n\n"
+                    "Geometry Dash has to restart to load them.",
+                    restored
+                ),
+                "Later", "Restart",
+                [](FLAlertLayer*, bool restart) {
+                    if (restart) utils::game::restart(true);
+                }
+            );
         }
     );
 }
@@ -374,20 +469,22 @@ void ProfilesPopup::pickExportTarget(Profile const& profile, bool withFiles) {
             if (withFiles) {
                 for (auto const& entry : copy.mods) {
                     if (!entry.enabled) continue;
-                    // Only what is actually installed can be packed.
-                    if (!Loader::get()->getLoadedMod(entry.id)) continue;
+                    // Loaded or parked, both resolve to a file; anything else
+                    // is skipped with a warning while packing.
                     embed.push_back(entry.id);
                 }
             }
 
-            if (auto res = packs::exportToFile(copy, *picked, embed); !res) {
+            auto res = packs::exportToFile(copy, *picked, embed);
+            if (!res) {
                 notify(fmt::format("Export failed: {}", res.unwrapErr()), NotificationIcon::Error);
                 return;
             }
 
+            auto embedded = res.unwrap();
             notify(
-                withFiles
-                    ? fmt::format("Exported with {} mod file(s)", embed.size())
+                embedded > 0
+                    ? fmt::format("Exported with {} mod file(s)", embedded)
                     : "Profile exported",
                 NotificationIcon::Success
             );
@@ -464,6 +561,7 @@ void ProfilesPopup::onImport() {
                     if (!download || missing.empty()) {
                         auto report = Manager::get()->apply(
                             profile,
+                            Manager::currentMode(),
                             Mod::get()->getSettingValue<bool>("disable-unlisted")
                         );
                         reportAndOfferRestart(report, profile.name);
@@ -488,6 +586,7 @@ void ProfilesPopup::onImport() {
 
                             auto report = Manager::get()->apply(
                                 profile,
+                                Manager::currentMode(),
                                 Mod::get()->getSettingValue<bool>("disable-unlisted")
                             );
 

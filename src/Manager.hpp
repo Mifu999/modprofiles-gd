@@ -13,16 +13,30 @@
 /// Slug reserved for the snapshot taken right before a profile is applied.
 inline constexpr char const* AUTO_BACKUP_SLUG = "auto-backup";
 
+/// How a profile is put into effect.
+enum class ApplyMode {
+    /// Only flip Geode's enabled/disabled switches. Every mod stays installed
+    /// and listed.
+    Toggle,
+    /// Move the .geode files themselves: anything the profile does not want
+    /// leaves `geode/mods` for the vault, anything it wants comes back.
+    MoveFiles,
+};
+
 /// Result of applying a profile, so the UI can report what actually happened.
 struct ApplyReport {
-    /// Mods whose state was changed.
+    /// Mods whose enabled state was changed.
     int changed = 0;
-    /// Mods listed by the profile that are not installed.
+    /// Mod files taken out of `geode/mods` and parked in the vault.
+    int movedOut = 0;
+    /// Mod files brought back from the vault into `geode/mods`.
+    int movedIn = 0;
+    /// Mods listed by the profile that are neither installed nor parked.
     std::vector<std::string> missing;
-    /// Mods that refused to toggle, with the reason Geode gave.
+    /// Mods that refused to toggle or whose file could not be moved.
     std::vector<std::string> failed;
 
-    bool needsRestart() const { return changed > 0; }
+    bool needsRestart() const { return changed > 0 || movedOut > 0 || movedIn > 0; }
 };
 
 /// Owns the on-disk profile collection. Profiles live as one JSON file each in
@@ -45,12 +59,18 @@ public:
 
     geode::Result<> remove(std::string_view slug);
 
-    /// Applies the enable/disable states of a profile to the installed mods.
-    /// Nothing is downloaded, installed or deleted here - this only toggles.
+    /// Puts a profile into effect. Nothing is ever deleted: Toggle only flips
+    /// switches, MoveFiles parks unwanted mod files in the vault where they can
+    /// be brought back at any time.
     /// Honours the `auto-backup` and `allow-self-disable` settings.
-    /// @param disableUnlisted also switch off every installed mod the profile
-    /// does not mention, for an exact match instead of a merge
-    ApplyReport apply(Profile const& profile, bool disableUnlisted = false);
+    /// @param mode whether to flip switches or move the files themselves
+    /// @param disableUnlisted in Toggle mode, also switch off every installed
+    /// mod the profile does not mention. Ignored in MoveFiles mode, where an
+    /// unlisted mod leaves the folder anyway.
+    ApplyReport apply(Profile const& profile, ApplyMode mode, bool disableUnlisted = false);
+
+    /// The mode the user picked in the settings.
+    static ApplyMode currentMode();
 
     /// Directory holding the profile JSON files. Created on first use.
     std::filesystem::path profilesDir() const;

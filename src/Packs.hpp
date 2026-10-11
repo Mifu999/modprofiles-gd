@@ -22,10 +22,11 @@ namespace packs {
     /// Scratch directory under the Geode temp dir, wiped on every launch.
     std::filesystem::path workDir();
 
-    /// Writes `profile` to `file`. Every id in `embedModIDs` that is installed
-    /// has its .geode package copied into the pack, so the profile stays usable
-    /// for mods that are not published on the index.
-    geode::Result<> exportToFile(
+    /// Writes `profile` to `file`. Every id in `embedModIDs` whose .geode file
+    /// can be found - installed or parked in the vault - is copied into the
+    /// pack, so the profile stays usable for mods that are not on the index.
+    /// @returns how many mod files ended up inside the pack
+    geode::Result<int> exportToFile(
         Profile const& profile,
         std::filesystem::path const& file,
         std::vector<std::string> const& embedModIDs

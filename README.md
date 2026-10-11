@@ -16,11 +16,26 @@ This is an updated merge of two no longer maintained mods:
 ## Features
 
 - **Profiles** - a named set of mod states, stored as one JSON file each in the mod's save directory
+- **Real switching** - applying a profile moves the `.geode` files: what the profile does not list goes to the vault, what it lists comes back. Your mod list holds the profile, not a pile of disabled mods. (Toggle-only mode is one setting away.)
+- **Vault** - `geode/mod-profiles-vault`, next to the mods folder but invisible to Geode; *Restore all* empties it back into `geode/mods`
+- **Dependency aware** - the dependencies of the mods a profile keeps are kept too
 - **Auto backup** - the state before an apply is always kept, so a wrong switch is reversible
-- **Editor** - per-mod toggles with search, *All / None / Invert*, and *Snapshot* to copy your current state
+- **Editor** - per-mod toggles with search, *All / None / Invert*, and *Snapshot*; parked mods stay listed and selectable
 - **Sharing** - export to a `.modprofile` file, either list-only or with the `.geode` files embedded
 - **Importing** - installs the packed mods, downloads the missing ones from the Geode index, then applies
-- **Non-destructive** - mods are only enabled and disabled; nothing is ever deleted
+- **Non-destructive** - nothing is ever deleted, only moved or toggled
+
+## How a switch works
+
+```
+geode/mods/                         geode/mod-profiles-vault/
+├── a.geode  (wanted)   ──stays──►  ├── index.json   { id -> file name }
+├── b.geode  (unwanted) ──parked──► ├── b.geode
+└── c.geode  (unwanted) ──parked──► └── c.geode
+                        ◄─restored─ d.geode  (wanted, was parked)
+```
+
+Mod ids are resolved from each loaded mod's package path, so a file that is not called `<id>.geode` is still matched to the right mod; `index.json` remembers the mapping for whatever is parked.
 
 ## Pack format
 
@@ -65,6 +80,7 @@ The GitHub workflow in `.github/workflows/build.yml` builds for all five targets
 src/
 ├── Profile.hpp/.cpp    data model + JSON (de)serialisation
 ├── Manager.hpp/.cpp    the profile collection on disk, and applying one
+├── Vault.hpp/.cpp      moving .geode files in and out of geode/mods
 ├── Packs.hpp/.cpp      .modprofile reading/writing, index lookups, downloads
 ├── main.cpp            load-time setup + the MenuLayer button
 └── ui/

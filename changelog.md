@@ -1,3 +1,18 @@
+# 2.1.0
+
+## Added
+- **Real setup switching.** Applying a profile now moves the `.geode` files themselves: everything the profile does not list leaves `geode/mods` for `geode/mod-profiles-vault`, and everything it does list comes back from there. Your mod list ends up holding exactly the profile instead of a long list of disabled mods. Turn `Switch mod files` off in the settings to go back to toggling only.
+- **Vault** button in the profile list: says how many files are parked and puts them all back in one go.
+- Dependencies of the mods a profile keeps are kept as well, so a switch cannot leave a mod behind without what it needs.
+- The confirmation now says how many files will move, instead of only how many mods are wanted.
+- Parked mods stay visible in the profile editor, marked *in the vault*, and are recorded in new profiles - a switch no longer makes them invisible to the next profile you save.
+
+## Changed
+- Exporting with files also packs mods that are currently parked
+- Importing no longer re-downloads a mod that is sitting in the vault
+- `Restore all` leaves a parked file alone when a copy is already installed, instead of overwriting the newer one
+- The pack manifest now marks a mod as packed only when its file really made it into the pack
+
 # 2.0.0
 
 A rewrite for Geode 5, merging two earlier mods into one maintained mod.

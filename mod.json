@@ -8,7 +8,7 @@
     },
     "id": "mifu.modprofiles",
     "name": "Mod Profiles",
-    "version": "v2.0.0",
+    "version": "v2.1.0",
     "developers": ["Mifuu"],
     "description": "Save, switch and share complete mod setups as profiles",
     "tags": ["utility", "interface", "enhancement", "offline"],
@@ -21,6 +21,12 @@
         "behaviour-title": {
             "type": "title",
             "name": "Behaviour"
+        },
+        "move-mod-files": {
+            "type": "bool",
+            "name": "Switch mod files, not just toggles",
+            "description": "Applying a profile <cg>moves the .geode files</c>: everything the profile does not list leaves <cy>geode/mods</c> for <cy>geode/mod-profiles-vault</c>, and everything it does list comes back from there. Your mod list then holds exactly the profile, instead of a long list of disabled mods.\n\nTurn this off to only flip Geode's enabled/disabled switches and leave every file in place.\n\nNothing is ever deleted either way - <cj>Vault</c> in the profile list puts everything back.",
+            "default": true
         },
         "auto-backup": {
             "type": "bool",
@@ -37,7 +43,7 @@
         "allow-self-disable": {
             "type": "bool",
             "name": "Allow disabling Mod Profiles",
-            "description": "Let profiles disable <cy>Mod Profiles</c> itself. Off by default, because once it is disabled you have to re-enable it by hand through the Geode menu before you can switch profiles again.",
+            "description": "Let profiles disable <cy>Mod Profiles</c> itself. Off by default, because once it is disabled you have to re-enable it by hand through the Geode menu before you can switch profiles again.\n\nThis only applies to toggling: when <cj>Switch mod files</c> is on, this mod's own file always stays in <cy>geode/mods</c>, otherwise the vault could no longer be reached.",
             "default": false
         },
         "import-title": {

@@ -32,7 +32,10 @@ protected:
         std::string id;
         std::string name;
         std::string version;
+        /// In `geode/mods` and loaded right now.
         bool installed = true;
+        /// Parked in the vault: not loaded, but one profile switch away.
+        bool parked = false;
     };
 
     bool init(Profile const& profile, bool isNew, std::function<void(Profile const&)> onSave);

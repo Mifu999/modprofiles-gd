@@ -26,6 +26,7 @@ protected:
 
     void onNewFromCurrent();
     void onImport();
+    void onVault();
     void onApply(Profile const& profile);
     void onEdit(Profile const& profile);
     void onExport(Profile const& profile);

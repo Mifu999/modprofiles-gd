@@ -1,4 +1,5 @@
 #include "Packs.hpp"
+#include "Vault.hpp"
 
 #include <Geode/loader/Dirs.hpp>
 #include <Geode/loader/Loader.hpp>
@@ -47,19 +48,45 @@ std::filesystem::path packs::workDir() {
     return dir;
 }
 
-geode::Result<> packs::exportToFile(
+geode::Result<int> packs::exportToFile(
     Profile const& profile,
     std::filesystem::path const& file,
     std::vector<std::string> const& embedModIDs
 ) {
-    GEODE_UNWRAP_INTO(auto zip, file::Zip::create(file));
+    // Resolve the files first: the manifest must describe what is really in the
+    // pack, not what was asked for. A mod with no file on disk is listed as an
+    // index download instead of a lie about being packed.
+    auto parked = vault::scanVault();
+    std::vector<std::pair<std::string, std::filesystem::path>> toEmbed;
 
-    // Record how every mod is expected to be obtained, so the importing side
-    // knows what to do without having to guess.
+    for (auto const& id : embedModIDs) {
+        std::filesystem::path package;
+
+        if (auto* mod = Loader::get()->getLoadedMod(id)) {
+            package = mod->getPackagePath();
+        }
+        else if (auto found = parked.find(id); found != parked.end()) {
+            // Parked mods are still yours, so they can travel too.
+            package = found->second;
+        }
+
+        if (package.empty() || !std::filesystem::exists(package)) {
+            log::warn("Cannot embed '{}': no .geode file found for it", id);
+            continue;
+        }
+
+        toEmbed.emplace_back(id, std::move(package));
+    }
+
+    auto isEmbedded = [&](std::string const& id) {
+        return std::any_of(toEmbed.begin(), toEmbed.end(), [&](auto const& pair) {
+            return pair.first == id;
+        });
+    };
+
     Profile stored = profile;
     for (auto& entry : stored.mods) {
-        bool embedded = std::find(embedModIDs.begin(), embedModIDs.end(), entry.id) != embedModIDs.end();
-        if (embedded) {
+        if (isEmbedded(entry.id)) {
             entry.source = ModSource::Packed;
         }
         else if (entry.source == ModSource::Packed) {
@@ -69,21 +96,11 @@ geode::Result<> packs::exportToFile(
         }
     }
 
+    GEODE_UNWRAP_INTO(auto zip, file::Zip::create(file));
     GEODE_UNWRAP(zip.add("profile.json", matjson::Value(stored).dump()));
 
-    for (auto const& id : embedModIDs) {
-        auto* mod = Loader::get()->getLoadedMod(id);
-        if (!mod) {
-            log::warn("Cannot embed '{}': not installed", id);
-            continue;
-        }
-
-        auto package = mod->getPackagePath();
-        if (!std::filesystem::exists(package)) {
-            log::warn("Cannot embed '{}': package file is missing", id);
-            continue;
-        }
-
+    int embedded = 0;
+    for (auto const& [id, package] : toEmbed) {
         // Read and re-add under a deterministic name rather than using
         // addFrom, which would keep whatever the file is called on disk.
         auto data = file::readBinary(package);
@@ -93,9 +110,10 @@ geode::Result<> packs::exportToFile(
         }
 
         GEODE_UNWRAP(zip.add(fmt::format("mods/{}.geode", id), data.unwrap()));
+        ++embedded;
     }
 
-    return geode::Ok();
+    return geode::Ok(embedded);
 }
 
 std::vector<std::pair<std::string, std::filesystem::path>> packs::OpenedPack::packedMods() const {
@@ -171,10 +189,15 @@ std::vector<ProfileEntry> packs::missingDownloadableMods(Profile const& profile,
         }
     }
 
+    // A parked mod is not loaded, but it is installed - downloading it again
+    // would only create a second copy of something already on disk.
+    auto inVault = vault::scanVault();
+
     std::vector<ProfileEntry> missing;
     for (auto const& entry : profile.mods) {
         if (!entry.enabled) continue;
         if (Loader::get()->getLoadedMod(entry.id)) continue;
+        if (inVault.contains(entry.id)) continue;
         if (std::find(packed.begin(), packed.end(), entry.id) != packed.end()) continue;
 
         missing.push_back(entry);
